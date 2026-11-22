@@ -11,12 +11,29 @@ const examples = [
 const money = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
 const number = new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 1 });
 const main = document.querySelector('#main');
-const defaults = { areas: areas.map(area => area.id), max: '', minSize: '' };
+const homeTypes = {
+  appartement: 'Appartement',
+  woonhuis: 'Woonhuis',
+  studio: 'Studio',
+  maisonnette: 'Maisonnette',
+  overig: 'Overig'
+};
+const sortOptions = {
+  standaard: 'Standaardvolgorde',
+  recent: 'Nieuwste eerst',
+  prijslaag: 'Laagste vraagprijs eerst',
+  prijshoog: 'Hoogste vraagprijs eerst',
+  oppervlakte: 'Grootste woonoppervlakte eerst',
+  vierkantemeter: 'Laagste vraagprijs per m² eerst'
+};
+const defaults = {
+  areas: areas.map(area => area.id), max: '', minSize: '', postcodes: [], types: [], sort: 'standaard'
+};
 function read(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; }
   catch { return fallback; }
 }
-let preferences = read('woningzoeker-preferences', defaults);
+let preferences = { ...defaults, ...read('woningzoeker-preferences', defaults) };
 let favorites = new Set(read('woningzoeker-favorites', []));
 let activeFilter = 'all';
 let data = { homes: [], benchmark: null };
@@ -41,16 +58,34 @@ function card(area) {
   return `<article class="card"><div class="card-media">${photo(area)}<span class="tag">${area.label}</span>${heart(area.id, area.name)}</div>
   <div class="card-body"><h3><a href="#buurt/${area.id}">${area.name}</a></h3><p class="card-title">${area.title}</p><p>${area.description}</p><a class="text-link" href="#buurt/${area.id}">Ontdek de buurt <span aria-hidden="true">↗</span></a></div></article>`;
 }
+function homeLocation(home) {
+  return [areas.find(area => area.id === home.area).name, home.postcode, homeTypes[home.type]]
+    .filter(Boolean).map(escape).join(' · ');
+}
 function listHomes(homes) {
-  return `<div class="home-list">${homes.map(home => `<article class="home-row"><div><h3><a href="#woning/${encodeURIComponent(home.id)}">${escape(home.title)}</a></h3><p>${areas.find(area => area.id === home.area).name} · ${money.format(home.price)} · ${number.format(home.size)} m²</p></div>${heart(home.id, home.title)}</article>`).join('')}</div>`;
+  return `<div class="home-list">${homes.map(home => `<article class="home-row"><div><h3><a href="#woning/${encodeURIComponent(home.id)}">${escape(home.title)}</a></h3><p>${homeLocation(home)} · ${money.format(home.price)} · ${number.format(home.size)} m²</p></div>${heart(home.id, home.title)}</article>`).join('')}</div>`;
 }
 function matches(home) {
   return preferences.areas.includes(home.area) && (activeFilter === 'all' || activeFilter === home.area) &&
+    (!preferences.postcodes.length || preferences.postcodes.includes(home.postcode?.slice(0, 4))) &&
+    (!preferences.types.length || preferences.types.includes(home.type)) &&
     (!preferences.max || home.price <= preferences.max) && (!preferences.minSize || home.size >= preferences.minSize);
 }
+function publicationTime(home) {
+  const timestamp = Date.parse(home.publishedAt);
+  return Number.isFinite(timestamp) ? timestamp : -Infinity;
+}
+const comparators = {
+  recent: (a, b) => publicationTime(b) - publicationTime(a),
+  prijslaag: (a, b) => a.price - b.price,
+  prijshoog: (a, b) => b.price - a.price,
+  oppervlakte: (a, b) => b.size - a.size,
+  vierkantemeter: (a, b) => a.price / a.size - b.price / b.size
+};
 function overview() {
   const visible = areas.filter(area => preferences.areas.includes(area.id) && (activeFilter === 'all' || activeFilter === area.id));
   const homes = data.homes.filter(matches);
+  if (Object.hasOwn(comparators, preferences.sort)) homes.sort(comparators[preferences.sort]);
   return `<section class="hero"><div class="hero-content"><div class="eyebrow"><span></span> WONEN IN AMSTERDAM</div><h1>Vind jouw plek<br>in <em>Amsterdam.</em></h1><p>Ontdek Amsterdam-West, Zuid en de Rivierenbuurt. Verken de buurten, bekijk wat een woning kost en bewaar je favorieten.</p><a class="primary" href="#overzicht/buurten">Ontdek de buurten <span aria-hidden="true">↓</span></a></div><div class="hero-image" role="img" aria-label="Impressie van Amsterdamse woningen"></div></section>
   <section class="section" id="buurten"><div class="section-heading"><div><span class="eyebrow">DE BUURTGIDS</span><h2>Buurtpareltjes</h2></div><div class="filters" aria-label="Filter op buurt">${[{id:'all',name:'Alle buurten'}, ...areas.filter(area => preferences.areas.includes(area.id))].map(area => `<button type="button" data-area="${area.id}" aria-pressed="${activeFilter === area.id}">${area.name}</button>`).join('')}</div></div>
   <div class="grid">${visible.map(card).join('')}</div></section>
@@ -59,10 +94,13 @@ function overview() {
   ${data.source ? `<p class="source">Aanbodbron: ${escape(data.source)} · gecontroleerd op ${new Date(data.updatedAt).toLocaleDateString('nl-NL', {timeZone:'Europe/Amsterdam'})}</p>` : ''}</section>`;
 }
 function settings() {
-  return `<section class="section inner"><span class="eyebrow">JOUW ZOEKOPDRACHT</span><h1>Instellingen</h1><p>Kies in welke buurten je wilt zoeken en stel je budget en minimale woonoppervlakte in.</p>
+  return `<section class="section inner"><span class="eyebrow">JOUW ZOEKOPDRACHT</span><h1>Instellingen</h1><p>Stel in welke woningen je wilt zien en kies de volgorde van het aanbod.</p>
   <form id="settings" class="panel"><fieldset><legend>Buurten</legend>${areas.map(area => `<label class="check"><input type="checkbox" name="area" value="${area.id}" ${preferences.areas.includes(area.id) ? 'checked' : ''}> ${area.name}</label>`).join('')}</fieldset>
+  <div class="field"><label for="postcodes">Postcodegebieden</label><input id="postcodes" name="postcodes" type="text" inputmode="text" aria-describedby="postcode-help" value="${escape(preferences.postcodes.join(', '))}" placeholder="Bijv. 1056, 1078"><small id="postcode-help">Vul vier cijfers per gebied in, gescheiden door een komma of spatie. Leeg geldt voor alle postcodes binnen je gekozen buurten.</small></div>
+  <fieldset><legend>Woningtype</legend><p class="field-help">Laat alle vakjes leeg om alle woningtypen te zien.</p>${Object.entries(homeTypes).map(([id, label]) => `<label class="check"><input type="checkbox" name="type" value="${id}" ${preferences.types.includes(id) ? 'checked' : ''}> ${label}</label>`).join('')}</fieldset>
   <label class="field">Maximale vraagprijs (€)<input name="max" type="number" min="1" step="1" value="${escape(preferences.max)}" placeholder="Geen maximum"></label>
   <label class="field">Minimale woonoppervlakte (m²)<input name="minSize" type="number" min="1" step="1" value="${escape(preferences.minSize)}" placeholder="Geen minimum"></label>
+  <label class="field">Sortering<select name="sort">${Object.entries(sortOptions).map(([id, label]) => `<option value="${id}" ${preferences.sort === id ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
   <button class="primary">Instellingen opslaan</button><p id="form-status" role="status"></p></form></section>`;
 }
 function favoritePage() {
@@ -86,7 +124,7 @@ function detail(area, home) {
   const title = home ? home.title : area.name;
   return `<section class="section detail"><a class="text-link" href="#overzicht">← Terug naar overzicht</a>
   <div class="detail-photo">${photo(area)}${heart(home ? home.id : area.id, title)}</div>
-  <span class="eyebrow">${area.label}</span><h1>${escape(title)}</h1><p>${home ? escape(home.description || '') : area.detail}</p>
+  <span class="eyebrow">${area.label}</span><h1>${escape(title)}</h1>${home ? `<p>${homeLocation(home)}</p>` : ''}<p>${home ? escape(home.description || '') : area.detail}</p>
   ${home ? `<a class="text-link" href="${escape(home.url)}" rel="noopener">Bekijk bij de aanbieder ↗</a>` : ''}
   ${analysis(home || examples.find(example => example.area === area.id), !home)}</section>`;
 }
@@ -139,7 +177,20 @@ main.addEventListener('submit', event => {
     status.textContent = 'Kies minstens één buurt.';
     return;
   }
-  preferences = { areas: selected, max: form.get('max'), minSize: form.get('minSize') };
+  const postcodeInput = event.target.elements.postcodes;
+  const postcodes = [...new Set(postcodeInput.value.split(/[\s,]+/).filter(Boolean))];
+  if (postcodes.some(code => !/^[1-9][0-9]{3}$/.test(code))) {
+    postcodeInput.setAttribute('aria-invalid', 'true');
+    status.textContent = 'Gebruik vier cijfers per postcodegebied, bijvoorbeeld 1056.';
+    postcodeInput.focus();
+    return;
+  }
+  postcodeInput.removeAttribute('aria-invalid');
+  postcodeInput.value = postcodes.join(', ');
+  preferences = {
+    areas: selected, max: form.get('max'), minSize: form.get('minSize'),
+    postcodes, types: form.getAll('type'), sort: form.get('sort')
+  };
   if (!selected.includes(activeFilter)) activeFilter = 'all';
   status.textContent = save('woningzoeker-preferences', preferences) ? 'Instellingen opgeslagen.' : 'Instellingen zijn alleen actief zolang deze pagina open is.';
 });

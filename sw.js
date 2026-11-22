@@ -1,6 +1,6 @@
 const scope = self.registration.scope;
 const prefix = `woningzoeker:${scope}:`;
-const cacheName = `${prefix}v1`;
+const cacheName = `${prefix}v2`;
 const shell = [
   './', './style.css', './app.js', './manifest.webmanifest', './assets/icon.svg',
   './assets/icon-192.png', './assets/icon-512.png', './assets/west.webp',
