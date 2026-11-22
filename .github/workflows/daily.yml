@@ -1,0 +1,41 @@
+name: Dagelijkse woningupdate
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-housing-update
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: CBS en toegestane aanbieder ophalen
+        id: refresh
+        continue-on-error: true
+        env:
+          LISTINGS_FEED_URL: ${{ secrets.LISTINGS_FEED_URL }}
+          LISTINGS_SOURCE_NAME: ${{ vars.LISTINGS_SOURCE_NAME }}
+        run: python scripts/update_data.py
+      - name: Gewijzigde momentopname vastleggen
+        run: |
+          if git diff --quiet -- data/aanbod.json; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- data/aanbod.json
+          git commit -m 'Werk woningdata bij'
+          git push
+      - name: Meld bronfouten
+        if: steps.refresh.outcome == 'failure'
+        run: exit 1
