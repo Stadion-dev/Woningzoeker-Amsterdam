@@ -15,6 +15,7 @@ OUTPUT = ROOT / "data" / "aanbod.json"
 TABLE = "83625NED"
 CBS_API = f"https://opendata.cbs.nl/ODataApi/odata/{TABLE}"
 AREAS = {"west", "zuid", "rivierenbuurt"}
+HOME_TYPES = {"appartement", "woonhuis", "studio", "maisonnette", "overig"}
 MAX_BYTES = 5_000_000
 
 
@@ -77,6 +78,29 @@ def text_field(value, limit):
     return value.strip()
 
 
+def search_metadata(row):
+    fields = {}
+    if row.get("postcode") is not None:
+        postcode = text_field(row["postcode"], 12)
+        if not re.fullmatch(r"[1-9][0-9]{3}(?: ?[A-Za-z]{2})?", postcode):
+            raise ValueError("Ongeldig Nederlands postcodegebied.")
+        fields["postcode"] = postcode[:4]
+    if row.get("type") is not None:
+        home_type = text_field(row["type"], 24).lower()
+        if home_type not in HOME_TYPES:
+            raise ValueError("Onbekend woningtype in de feed.")
+        fields["type"] = home_type
+    if row.get("publishedAt") is not None:
+        published_at = text_field(row["publishedAt"], 45)
+        if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", published_at):
+            published_at += "T00:00:00Z"
+        published = datetime.fromisoformat(published_at)
+        if published.tzinfo is None:
+            raise ValueError("Een publicatietijd moet een tijdzone bevatten.")
+        fields["publishedAt"] = published.astimezone(timezone.utc).isoformat()
+    return fields
+
+
 def allowed_feed(payload, source):
     items = payload["homes"]
     if not isinstance(items, list):
@@ -101,6 +125,7 @@ def allowed_feed(payload, source):
             "price": row["price"],
             "size": row["size"],
             "url": https_url(text_field(row["url"], 2000)),
+            **search_metadata(row),
         })
     return {"source": text_field(source, 120), "homes": sorted(homes, key=lambda home: home["id"])}
 
@@ -123,7 +148,7 @@ def main():
             data.update(allowed_feed(fetch_json(url), source))
             # Refresh date only when a feed was successfully checked.
             data["updatedAt"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        except (OSError, ValueError, KeyError, AttributeError, TypeError) as exc:
+        except (OSError, ValueError, KeyError, AttributeError, TypeError, OverflowError) as exc:
             print(f"Aanbodupdate mislukt ({type(exc).__name__}). Vorig aanbod blijft beschikbaar.", file=sys.stderr)
             failures = True
     elif data["source"] is not None:

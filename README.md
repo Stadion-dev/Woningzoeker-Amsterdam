@@ -2,6 +2,10 @@
 
 Een Nederlandstalige PWA voor koopwoningen in Amsterdam-West, Amsterdam-Zuid en de Rivierenbuurt. De buurtgids bevat drie buurtpareltjes. Per buurt kun je een prijsberekening bekijken. Bij aangesloten aanbod toont de app de vraagprijs en vraagprijs per vierkante meter per woning. Zoekvoorkeuren en favorieten worden lokaal in de browser bewaard.
 
+## Zoekinstellingen
+
+Combineer buurten, viercijferige postcodegebieden, woningtypen, maximale vraagprijs en minimale woonoppervlakte. Meerdere postcodes of woningtypen binnen één filter zijn alternatieven. De filters worden samen toegepast op het woningaanbod. Sorteer op publicatiedatum, vraagprijs, woonoppervlakte of vraagprijs per m². Bij sortering op nieuwste eerst staan woningen zonder publicatiedatum onderaan.
+
 ## Lokaal gebruiken
 
 ```sh
@@ -23,7 +27,7 @@ Voor lokaal verversen is alleen Python nodig.
 python3 scripts/update_data.py
 ```
 
-Voeg voor een toegestane feed in GitHub Actions het secret `LISTINGS_FEED_URL` en de repositoryvariabele `LISTINGS_SOURCE_NAME` toe. Publiceer alleen gegevens waarvoor je de benodigde toestemming hebt. De feed moet het volledige actuele aanbod voor de ondersteunde buurten leveren, met stabiele unieke ID's, prijzen in euro en woonoppervlaktes in vierkante meter. De ID mag letters, cijfers, punten, streepjes en underscores bevatten. `description` is optioneel.
+Voeg voor een toegestane feed in GitHub Actions het secret `LISTINGS_FEED_URL` en de repositoryvariabele `LISTINGS_SOURCE_NAME` toe. Publiceer alleen gegevens waarvoor je de benodigde toestemming hebt. De feed moet het volledige actuele aanbod voor de ondersteunde buurten leveren, met stabiele unieke ID's, prijzen in euro en woonoppervlaktes in vierkante meter. De ID mag letters, cijfers, punten, streepjes en underscores bevatten. `description` is optioneel. Geef voor postcodefilters `postcode` op als Nederlandse postcode of viercijferig postcodegebied. De openbare momentopname bewaart alleen de eerste vier cijfers. Gebruik voor `type` een van `appartement`, `woonhuis`, `studio`, `maisonnette` of `overig`. Geef voor sortering op nieuwste eerst `publishedAt` op als ISO-datum of ISO-tijdstip met tijdzone. Oudere feeds mogen deze velden weglaten. Aanbod zonder postcode of type blijft zichtbaar zolang het overeenkomstige filter leeg is.
 
 ```json
 {
@@ -33,6 +37,9 @@ Voeg voor een toegestane feed in GitHub Actions het secret `LISTINGS_FEED_URL` e
       "area": "west",
       "title": "Voorbeeldwoning",
       "description": "Appartement met balkon",
+      "postcode": "1056",
+      "type": "appartement",
+      "publishedAt": "2026-11-22T09:00:00+01:00",
       "price": 485000,
       "size": 66,
       "url": "https://aanbieder.example/woningen/12345"
