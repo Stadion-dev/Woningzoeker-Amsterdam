@@ -1,0 +1,109 @@
+name: Tijdelijke zoek-API-test
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test-search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+      BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+    steps:
+      - name: Test Tavily en Brave Search
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlencode, urlsplit
+          from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          opener = build_opener(NoRedirect())
+          tavily_key = os.getenv("TAVILY_API_KEY")
+          brave_key = os.getenv("BRAVE_SEARCH_API_KEY")
+          areas = ("Amsterdam-West", "Amsterdam-Zuid", "Rivierenbuurt")
+
+          def search(provider, query):
+              if provider == "Tavily":
+                  headers = {"Content-Type": "application/json", "X-Client-Source": "woningzoeker-test"}
+                  if tavily_key:
+                      headers["Authorization"] = f"Bearer {tavily_key}"
+                  else:
+                      headers["X-Tavily-Access-Mode"] = "keyless"
+                      headers["X-Client-Source"] = "tavily-python-keyless"
+                  body = json.dumps({
+                      "query": query, "search_depth": "basic", "max_results": 5,
+                  }).encode("utf-8")
+                  request = Request("https://api.tavily.com/search", data=body, headers=headers)
+              else:
+                  params = urlencode({"q": query, "country": "NL", "search_lang": "nl", "count": 5})
+                  headers = {"Accept": "application/json"}
+                  if brave_key:
+                      headers["X-Subscription-Token"] = brave_key
+                  request = Request("https://api.search.brave.com/res/v1/web/search?" + params, headers=headers)
+
+              with opener.open(request, timeout=15) as response:
+                  status = response.status
+                  try:
+                      payload = json.loads(response.read(1024 * 1024))
+                      if provider == "Tavily":
+                          rows = payload["results"]
+                      elif payload.get("type") == "search":
+                          rows = payload.get("web", {}).get("results", [])
+                      else:
+                          raise ValueError
+                      if not isinstance(rows, list):
+                          raise ValueError
+                  except (ValueError, KeyError, AttributeError, TypeError):
+                      return status, None
+                  return status, rows
+
+          def domains(rows):
+              hosts = set()
+              for row in rows:
+                  try:
+                      host = urlsplit(row["url"]).hostname
+                  except (ValueError, KeyError, AttributeError, TypeError):
+                      continue
+                  if host and re.fullmatch(r"[a-z0-9.-]{1,253}", host):
+                      hosts.add(host)
+              return ", ".join(sorted(hosts)) or "—"
+
+          failed = False
+          print("Tavily: API-sleutel" if tavily_key else "Tavily: beperkte proef zonder sleutel")
+          print("Brave: API-sleutel" if brave_key else "Brave: alleen bereikbaarheid (sleutel ontbreekt)")
+          for provider in ("Tavily", "Brave"):
+              for area in areas:
+                  label = f"{provider} / {area}"
+                  query = f'koopwoning te koop "{area}" Amsterdam appartement woonhuis makelaar'
+                  try:
+                      status, rows = search(provider, query)
+                  except HTTPError as error:
+                      error.close()
+                      if provider == "Brave" and not brave_key and error.code in (401, 422):
+                          print(f"{label}: HTTP {error.code}; endpoint reageert, zoektest vereist BRAVE_SEARCH_API_KEY")
+                          break
+                      print(f"{label}: HTTP {error.code}; geen resultaten gecontroleerd")
+                      failed = True
+                      continue
+                  except (URLError, OSError):
+                      print(f"{label}: netwerkfout of timeout")
+                      failed = True
+                      continue
+                  if rows is None:
+                      print(f"{label}: HTTP {status}; geen geldige zoekrespons")
+                      failed = True
+                      continue
+                  print(f"{label}: HTTP {status}, {len(rows)} resultaten, domeinen: {domains(rows)}")
+          raise SystemExit(int(failed))
+          PY
